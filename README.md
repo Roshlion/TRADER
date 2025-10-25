@@ -1,46 +1,52 @@
 # TRADER
 
-**AI-powered algorithmic trading platform**
+**Quantitative trading research platform**
 
-Building intelligent trading strategies using machine learning and quantitative analysis to identify market opportunities.
+Building data-driven trading strategies using high-performance analytics and machine learning.
 
 ---
 
 ## Overview
 
-TRADER analyzes market data using AI to discover patterns, predict price movements, and develop profitable trading strategies. The platform processes high-frequency market data and applies machine learning models to identify opportunities in real-time.
+TRADER is a research and development platform for quantitative trading strategies. It processes market data at scale using modern data engineering tools and applies statistical and machine learning techniques to identify trading opportunities.
 
-**Current Focus:**
-- Pattern recognition in minute-level stock data
-- Strategy backtesting and optimization
-- Risk management and position sizing
-- Multi-timeframe analysis
+**Research Focus:**
+- High-frequency pattern recognition
+- Statistical arbitrage strategies
+- Machine learning-based predictions
+- Risk-adjusted portfolio optimization
 
-**Future Roadmap:**
-- Real-time trade execution
-- Portfolio optimization algorithms
-- Sentiment analysis integration
-- Multi-asset strategy expansion
+**Technical Capabilities:**
+- Minute-level market data processing
+- Columnar analytics (Parquet/DuckDB)
+- Cloud-native architecture
+- Backtesting infrastructure
 
 ---
 
 ## Tech Stack
 
 - **Python 3.11+** - Core development
-- **Polars** - High-performance data processing
-- **DuckDB** - Fast SQL analytics
-- **PyArrow** - Columnar storage
+- **Polars** - High-performance DataFrames (Rust-based)
+- **DuckDB** - In-process SQL analytics engine
+- **PyArrow/Parquet** - Columnar storage format
+- **AWS S3** - Cloud data lake
+- **rclone** - Data transfer & sync
 
 ---
 
 ## Quick Start
 
 ```powershell
-# Initialize environment
+# Initialize Python environment
 .\scripts\windows\init.ps1
 
-# Configure settings
+# Configure (non-secret settings only)
 copy .env.example .env
+# Edit .env with your configuration
+
+# Run sample data pull
+.\scripts\windows\sample_pull.ps1
 ```
 
 ---
@@ -49,16 +55,56 @@ copy .env.example .env
 
 ```
 TRADER/
-├── src/trader/       # Core trading logic
-├── scripts/          # Automation & utilities
-├── sql/              # Analytics queries
-├── notebooks/        # Research & experiments
-└── tests/            # Test suite
+├── src/trader/         # Core trading logic & utilities
+├── scripts/
+│   ├── windows/        # PowerShell automation
+│   └── python/         # Data processing pipelines
+├── sql/                # Analytics queries
+├── notebooks/          # Research & experiments
+└── tests/              # Test suite
 ```
 
 ---
 
-## Data Sources
+## Development
 
-- **Market Data:** polygon.io
-- **Local Testing Source:** S3
+**Requirements:**
+- Python 3.11+
+- PowerShell 5.1+ (Windows)
+- AWS CLI configured
+- rclone installed
+
+**Setup:**
+```powershell
+# Install dependencies
+pip install -r requirements.txt
+
+# Verify installation
+python -c "import polars, duckdb, pyarrow; print('All dependencies installed')"
+```
+
+---
+
+## Data Pipeline
+
+**Sources:**
+- Market data: Polygon.io Flat Files API
+- Storage: AWS S3 (encrypted, versioned)
+- Format: CSV.gz (raw), Parquet (curated)
+
+**Processing:**
+- Server-side sync (Polygon → S3 via rclone)
+- Parquet conversion for analytics
+- Partitioned by date for query optimization
+
+---
+
+## License
+
+To be determined
+
+---
+
+## Disclaimer
+
+This project is for educational and research purposes. Trading involves substantial risk of loss. Past performance does not guarantee future results.
