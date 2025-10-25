@@ -1,12 +1,17 @@
+# Python
 __pycache__/
 *.pyc
 .venv/
 .env
 .env.*
 .ipynb_checkpoints/
+
+# Data & temp
 data/
 !data/.gitkeep
 tmp/
 .cache/
+
+# OS/Editor
 .DS_Store
 .vscode/

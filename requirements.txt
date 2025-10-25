@@ -1,5 +1,6 @@
 boto3
 pandas
-numpy
+polars
 pyarrow
+duckdb
 python-dotenv
