@@ -8,8 +8,8 @@ if (-not $env:POLYGON_ACCESS_KEY -or -not $env:POLYGON_SECRET_KEY) {
 }
 
 # Create/overwrite remotes idempotently
-rclone config delete polygon 2>$null
-rclone config delete aws 2>$null
+rclone config delete polygon 2>&1 | Out-Null
+rclone config delete aws 2>&1 | Out-Null
 
 rclone config create polygon s3 env_auth=false `
   access_key_id="$env:POLYGON_ACCESS_KEY" `

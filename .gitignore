@@ -15,3 +15,4 @@ tmp/
 # OS/Editor
 .DS_Store
 .vscode/
+.claude/
