@@ -12,6 +12,10 @@ data/
 tmp/
 .cache/
 
+# Internal documentation (not for public repo)
+CLAUDE.md
+DOCUMENTATION.md
+
 # OS/Editor
 .DS_Store
 .vscode/
