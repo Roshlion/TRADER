@@ -353,3 +353,232 @@ def print_metrics_summary(metrics: PerformanceMetrics):
     print(f"  Initial Capital:    ${metrics.initial_capital:>10,.2f}")
     print(f"  Final Equity:       ${metrics.final_equity:>10,.2f}")
     print("=" * 60 + "\n")
+
+
+# ============================================================================
+# Portfolio Optimization Helpers
+# ============================================================================
+
+def dailyize(returns: np.ndarray, min_per_day: int = 390) -> np.ndarray:
+    """
+    Convert intraday returns to daily returns.
+
+    Args:
+        returns: Array of intraday (e.g., minute) returns
+        min_per_day: Minutes per trading day (default: 390 for US markets)
+
+    Returns:
+        Array of daily returns
+    """
+    if len(returns) == 0:
+        return np.array([])
+
+    n_days = int(np.ceil(len(returns) / min_per_day))
+    daily_returns = []
+
+    for i in range(n_days):
+        start_idx = i * min_per_day
+        end_idx = min((i + 1) * min_per_day, len(returns))
+        day_returns = returns[start_idx:end_idx]
+
+        if len(day_returns) > 0:
+            # Compound returns: (1+r1)*(1+r2)*... - 1
+            daily_ret = np.prod(1 + day_returns) - 1
+            daily_returns.append(daily_ret)
+
+    return np.array(daily_returns)
+
+
+def sharpe(returns: np.ndarray, rf: float = 0.0, annualize: bool = True, periods_per_year: int = 252) -> float:
+    """
+    Calculate Sharpe ratio.
+
+    Args:
+        returns: Array of period returns
+        rf: Risk-free rate (annualized if annualize=True)
+        annualize: Whether to annualize the ratio
+        periods_per_year: Number of periods per year for annualization
+
+    Returns:
+        Sharpe ratio
+    """
+    if len(returns) == 0 or np.std(returns) == 0:
+        return 0.0
+
+    mean_return = np.mean(returns)
+    std_return = np.std(returns)
+
+    if annualize:
+        sharpe_ratio = (mean_return * periods_per_year - rf) / (std_return * np.sqrt(periods_per_year))
+    else:
+        sharpe_ratio = (mean_return - rf / periods_per_year) / std_return
+
+    return sharpe_ratio
+
+
+def sortino(returns: np.ndarray, rf: float = 0.0, annualize: bool = True, periods_per_year: int = 252) -> float:
+    """
+    Calculate Sortino ratio (downside risk-adjusted return).
+
+    Args:
+        returns: Array of period returns
+        rf: Risk-free rate (annualized if annualize=True)
+        annualize: Whether to annualize the ratio
+        periods_per_year: Number of periods per year for annualization
+
+    Returns:
+        Sortino ratio
+    """
+    if len(returns) == 0:
+        return 0.0
+
+    mean_return = np.mean(returns)
+    downside_returns = returns[returns < 0]
+
+    if len(downside_returns) == 0:
+        return 0.0
+
+    downside_std = np.std(downside_returns)
+
+    if downside_std == 0:
+        return 0.0
+
+    if annualize:
+        sortino_ratio = (mean_return * periods_per_year - rf) / (downside_std * np.sqrt(periods_per_year))
+    else:
+        sortino_ratio = (mean_return - rf / periods_per_year) / downside_std
+
+    return sortino_ratio
+
+
+def max_drawdown(equity: np.ndarray) -> float:
+    """
+    Calculate maximum drawdown from equity curve.
+
+    Args:
+        equity: Array of equity values
+
+    Returns:
+        Maximum drawdown as decimal (e.g., -0.15 for 15% drawdown)
+    """
+    if len(equity) < 2:
+        return 0.0
+
+    running_max = np.maximum.accumulate(equity)
+    drawdowns = (equity - running_max) / running_max
+
+    return np.min(drawdowns)
+
+
+def hit_rate(returns: np.ndarray) -> float:
+    """
+    Calculate hit rate (percentage of positive returns).
+
+    Args:
+        returns: Array of period returns
+
+    Returns:
+        Hit rate as percentage (0-100)
+    """
+    if len(returns) == 0:
+        return 0.0
+
+    positive_returns = np.sum(returns > 0)
+    return (positive_returns / len(returns)) * 100
+
+
+def ulcer_index(equity: np.ndarray) -> float:
+    """
+    Calculate Ulcer Index (measure of downside volatility).
+
+    Args:
+        equity: Array of equity values
+
+    Returns:
+        Ulcer Index value
+    """
+    if len(equity) < 2:
+        return 0.0
+
+    running_max = np.maximum.accumulate(equity)
+    drawdowns = ((equity - running_max) / running_max) * 100  # As percentage
+
+    # Ulcer Index = sqrt(sum(drawdown^2) / n)
+    ulcer = np.sqrt(np.mean(drawdowns ** 2))
+
+    return ulcer
+
+
+def metrics_from_returns(returns: np.ndarray, equity: Optional[np.ndarray] = None,
+                        rf: float = 0.0, periods_per_year: int = 252) -> Dict[str, float]:
+    """
+    Calculate a comprehensive set of metrics from returns series.
+
+    Args:
+        returns: Array of period returns
+        equity: Optional equity curve (if None, computed from returns starting at 1.0)
+        rf: Risk-free rate (annualized)
+        periods_per_year: Number of periods per year
+
+    Returns:
+        Dictionary of metric name -> value
+    """
+    if len(returns) == 0:
+        return {
+            "total_return": 0.0,
+            "sharpe": 0.0,
+            "sortino": 0.0,
+            "max_dd": 0.0,
+            "hit_rate": 0.0,
+            "ulcer": 0.0,
+            "volatility": 0.0,
+        }
+
+    # Compute equity if not provided
+    if equity is None:
+        equity = np.cumprod(1 + returns)
+
+    total_return = equity[-1] - 1.0 if len(equity) > 0 else 0.0
+
+    return {
+        "total_return": total_return,
+        "sharpe": sharpe(returns, rf, annualize=True, periods_per_year=periods_per_year),
+        "sortino": sortino(returns, rf, annualize=True, periods_per_year=periods_per_year),
+        "max_dd": max_drawdown(equity),
+        "hit_rate": hit_rate(returns),
+        "ulcer": ulcer_index(equity),
+        "volatility": np.std(returns) * np.sqrt(periods_per_year),
+    }
+
+
+def dailyize(returns: np.ndarray, min_per_day: int = 390) -> np.ndarray:
+    """
+    Convert intraday returns to daily returns.
+
+    Aggregates minute-level returns into daily returns by compounding
+    within each day.
+
+    Args:
+        returns: Array of intraday returns (e.g., per-minute)
+        min_per_day: Number of minutes per trading day (default: 390 = 6.5 hours)
+
+    Returns:
+        Array of daily returns
+    """
+    if len(returns) == 0:
+        return np.array([])
+
+    # Reshape into days (assumes returns are chronological)
+    n_days = int(np.ceil(len(returns) / min_per_day))
+    daily_returns = []
+
+    for i in range(n_days):
+        start_idx = i * min_per_day
+        end_idx = min((i + 1) * min_per_day, len(returns))
+        day_returns = returns[start_idx:end_idx]
+
+        # Compound returns within the day: (1+r1)*(1+r2)*...*(1+rn) - 1
+        daily_ret = np.prod(1 + day_returns) - 1
+        daily_returns.append(daily_ret)
+
+    return np.array(daily_returns)

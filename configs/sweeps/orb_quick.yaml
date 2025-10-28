@@ -1,0 +1,3 @@
+range_minutes: [30, 60]
+confirm_bars: [0, 1]
+atr_mult_stop: [1.0]

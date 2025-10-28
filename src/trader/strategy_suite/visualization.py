@@ -405,3 +405,157 @@ def save_metrics_to_csv(
         writer.writerow(row)
 
     print(f"Metrics appended to {output_path}")
+
+
+def plot_multi_equity(
+    equity_curves: Dict[str, any],
+    title: str = "Multi-Strategy Equity Curves",
+    output_file: Optional[str] = None,
+    show: bool = True
+):
+    """
+    Plot multiple equity curves on the same chart.
+
+    Args:
+        equity_curves: Dictionary mapping strategy names to equity Series/lists
+        title: Plot title
+        output_file: Path to save figure (optional)
+        show: Whether to display the plot
+    """
+    import pandas as pd
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+
+    for name, equity in equity_curves.items():
+        if isinstance(equity, pd.Series):
+            ax.plot(equity.index, equity.values, label=name, linewidth=2, alpha=0.8)
+        elif isinstance(equity, list) and len(equity) > 0 and isinstance(equity[0], tuple):
+            # List of (timestamp, value) tuples
+            timestamps = [t for t, _ in equity]
+            values = [v for _, v in equity]
+            ax.plot(timestamps, values, label=name, linewidth=2, alpha=0.8)
+        else:
+            # Assume it's a list of values
+            ax.plot(equity, label=name, linewidth=2, alpha=0.8)
+
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('Equity', fontsize=12)
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"Saved plot: {output_file}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+
+def plot_corr_heatmap(
+    returns_df: any,
+    title: str = "Strategy Returns Correlation Heatmap",
+    output_file: Optional[str] = None,
+    show: bool = True
+):
+    """
+    Plot correlation heatmap of strategy returns.
+
+    Args:
+        returns_df: DataFrame with strategy returns as columns
+        title: Plot title
+        output_file: Path to save figure (optional)
+        show: Whether to display the plot
+    """
+    import pandas as pd
+
+    if not isinstance(returns_df, pd.DataFrame):
+        print("Warning: returns_df is not a DataFrame, skipping heatmap")
+        return
+
+    # Compute correlation matrix
+    corr = returns_df.corr()
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Create heatmap
+    im = ax.imshow(corr, cmap='RdYlGn', aspect='auto', vmin=-1, vmax=1)
+
+    # Set ticks and labels
+    ax.set_xticks(np.arange(len(corr.columns)))
+    ax.set_yticks(np.arange(len(corr.index)))
+    ax.set_xticklabels(corr.columns, rotation=45, ha='right')
+    ax.set_yticklabels(corr.index)
+
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('Correlation', rotation=270, labelpad=20)
+
+    # Add correlation values as text
+    for i in range(len(corr.index)):
+        for j in range(len(corr.columns)):
+            text = ax.text(j, i, f'{corr.iloc[i, j]:.2f}',
+                          ha="center", va="center", color="black", fontsize=9)
+
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+
+    plt.tight_layout()
+
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"Saved plot: {output_file}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+
+def plot_weight_trajectory(
+    weights_df: any,
+    title: str = "Portfolio Weights Over Time",
+    output_file: Optional[str] = None,
+    show: bool = True
+):
+    """
+    Plot time-varying portfolio weights as a stacked area chart.
+
+    Args:
+        weights_df: DataFrame with strategies as columns, timestamps as index, weights as values
+        title: Plot title
+        output_file: Path to save figure (optional)
+        show: Whether to display the plot
+    """
+    import pandas as pd
+
+    if not isinstance(weights_df, pd.DataFrame):
+        print("Warning: weights_df is not a DataFrame, skipping weight trajectory")
+        return
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+
+    # Create stacked area plot
+    ax.stackplot(weights_df.index, *[weights_df[col] for col in weights_df.columns],
+                 labels=weights_df.columns, alpha=0.7)
+
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('Weight', fontsize=12)
+    ax.set_ylim([0, 1])
+    ax.legend(loc='upper left', fontsize=10, bbox_to_anchor=(1.02, 1))
+    ax.grid(True, alpha=0.3, axis='y')
+
+    plt.tight_layout()
+
+    if output_file:
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        print(f"Saved plot: {output_file}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close()

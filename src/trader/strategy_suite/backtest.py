@@ -283,6 +283,123 @@ def run_backtest(
         backtester.close()
 
 
+def load_bars_s3(
+    tickers: List[str],
+    start: str,
+    end: str,
+    columns: tuple = ("ticker", "window_start", "open", "high", "low", "close", "volume"),
+    s3_bucket: str = "polygon-trader-data-roshen",
+    s3_prefix: str = "curated/minute_bars"
+) -> pl.DataFrame:
+    """
+    Load minute bar data from S3 Parquet using DuckDB.
+
+    Convenience function for loading market data with partition pruning.
+
+    Args:
+        tickers: List of ticker symbols
+        start: Start date (YYYY-MM-DD)
+        end: End date (YYYY-MM-DD)
+        columns: Tuple of column names to select
+        s3_bucket: S3 bucket name
+        s3_prefix: S3 key prefix for parquet files
+
+    Returns:
+        Polars DataFrame with OHLCV data
+    """
+    import boto3
+
+    # Initialize DuckDB connection
+    conn = duckdb.connect()
+    conn.execute("INSTALL httpfs;")
+    conn.execute("LOAD httpfs;")
+
+    # Configure S3 credentials
+    try:
+        session = boto3.Session()
+        credentials = session.get_credentials()
+
+        if credentials:
+            conn.execute(f"SET s3_region='{session.region_name or 'us-east-1'}';")
+            conn.execute(f"SET s3_access_key_id='{credentials.access_key}';")
+            conn.execute(f"SET s3_secret_access_key='{credentials.secret_key}';")
+
+            if credentials.token:
+                conn.execute(f"SET s3_session_token='{credentials.token}';")
+        else:
+            raise ValueError("No AWS credentials found")
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to initialize S3 credentials: {e}")
+
+    # Parse dates
+    start_date = datetime.strptime(start, "%Y-%m-%d").date()
+    end_date = datetime.strptime(end, "%Y-%m-%d").date()
+
+    # Generate date range
+    from datetime import timedelta
+    dates = []
+    current = start_date
+    while current <= end_date:
+        dates.append(current)
+        current += timedelta(days=1)
+
+    all_data = []
+
+    for date_obj in dates:
+        date_str = date_obj.strftime("%Y-%m-%d")
+        year = date_obj.year
+        month = date_obj.month
+
+        s3_path = f"s3://{s3_bucket}/{s3_prefix}/year={year}/month={month}/day={date_str}/*.parquet"
+        ticker_list = ", ".join([f"'{t}'" for t in tickers])
+
+        # Build column select
+        col_mapping = {
+            "window_start": "timestamp",
+            "ticker": "ticker",
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "volume": "volume",
+            "transactions": "transactions"
+        }
+
+        selected_cols = []
+        for col in columns:
+            if col in col_mapping:
+                if col == "window_start":
+                    selected_cols.append("window_start as timestamp")
+                else:
+                    selected_cols.append(col)
+
+        cols_str = ", ".join(selected_cols) if selected_cols else "*"
+
+        query = f"""
+        SELECT {cols_str}
+        FROM read_parquet('{s3_path}')
+        WHERE ticker IN ({ticker_list})
+        ORDER BY window_start
+        """
+
+        try:
+            result = conn.execute(query).pl()
+            if len(result) > 0:
+                all_data.append(result)
+        except Exception:
+            # Skip missing dates (e.g., weekends, holidays)
+            pass
+
+    conn.close()
+
+    if not all_data:
+        return pl.DataFrame()
+
+    # Concatenate all data
+    return pl.concat(all_data)
+
+
 def main():
     """Command-line interface for running backtests."""
     parser = argparse.ArgumentParser(

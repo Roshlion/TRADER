@@ -11,6 +11,8 @@ data/
 !data/.gitkeep
 tmp/
 .cache/
+artifacts/
+!artifacts/.gitkeep
 
 # Internal documentation (not for public repo)
 CLAUDE.md
