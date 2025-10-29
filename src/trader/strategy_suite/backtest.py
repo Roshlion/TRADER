@@ -21,6 +21,7 @@ from .strategies.momentum import BreakoutMomentumStrategy, VolumeSpikeStrategy
 from .strategies.mean_reversion import VWAPReversionStrategy, BollingerBandStrategy
 from .strategies.stat_arb import PairsTradingStrategy
 from .strategies.ml import MLClassifierStrategy
+from .optimal.optimal import OptimalStrategy
 
 
 @dataclass
@@ -415,6 +416,7 @@ def main():
             "mean_reversion.BollingerBand",
             "stat_arb.PairsTrading",
             "ml.MLClassifier",
+            "optimal.OptimalStrategy",
         ],
         help="Strategy to backtest"
     )
@@ -463,6 +465,7 @@ def main():
         "mean_reversion.BollingerBand": BollingerBandStrategy,
         "stat_arb.PairsTrading": PairsTradingStrategy,
         "ml.MLClassifier": MLClassifierStrategy,
+        "optimal.OptimalStrategy": OptimalStrategy,
     }
 
     strategy_class = strategy_map[args.strategy]

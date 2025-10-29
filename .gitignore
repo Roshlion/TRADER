@@ -17,6 +17,8 @@ artifacts/
 # Internal documentation (not for public repo)
 CLAUDE.md
 DOCUMENTATION.md
+OPTIMIZER_ANALYSIS.md
+VALIDATION_RESULTS.md
 
 # OS/Editor
 .DS_Store

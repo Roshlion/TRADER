@@ -32,7 +32,6 @@ from trader.strategy_suite.metrics import (
     sharpe,
     sortino,
     max_drawdown,
-    calmar,
     calculate_metrics
 )
 
