@@ -47,6 +47,7 @@ from trader.strategy_suite.strategies.kf_trend import KFTrend
 from trader.strategy_suite.strategies.momentum import BreakoutMomentumStrategy, VolumeSpikeStrategy
 from trader.strategy_suite.strategies.mean_reversion import VWAPReversionStrategy, BollingerBandStrategy
 from trader.strategy_suite.strategies.stat_arb import PairsTradingStrategy
+from trader.strategy_suite.strategies.machine_learning import MLClassifierStrategy
 
 
 # Strategy registry
@@ -67,6 +68,9 @@ STRATEGIES = {
     "mean_reversion.VWAPReversion": VWAPReversionStrategy,
     "mean_reversion.BollingerBand": BollingerBandStrategy,
     "stat_arb.PairsTrading": PairsTradingStrategy,
+
+    # ML strategy
+    "machine_learning.MLClassifier": MLClassifierStrategy,
 }
 
 
@@ -84,6 +88,8 @@ def run_strategy_backtest(
     start: str,
     end: str,
     capital: float,
+    slippage_rate: float = 0.0,
+    commission_per_share: float = 0.0,
     **strategy_params
 ) -> pd.Series:
     """
@@ -104,7 +110,9 @@ def run_strategy_backtest(
             tickers=tickers,
             start_date=start,
             end_date=end,
-            initial_capital=capital
+            initial_capital=capital,
+            slippage_rate=slippage_rate,
+            commission_per_share=commission_per_share
         )
 
         # Extract equity curve
@@ -139,7 +147,9 @@ def build_returns_matrix(
     tickers: List[str],
     start: str,
     end: str,
-    capital: float
+    capital: float,
+    slippage_rate: float = 0.0,
+    commission_per_share: float = 0.0
 ) -> pd.DataFrame:
     """
     Run backtests for all strategies and build returns matrix.
@@ -165,7 +175,9 @@ def build_returns_matrix(
             tickers,
             start,
             end,
-            capital
+            capital,
+            slippage_rate,
+            commission_per_share
         )
 
         if len(strat_returns) > 0:
@@ -212,6 +224,40 @@ def optimize_static(
             max_weight=max_weight,
             long_only=long_only
         )
+    elif objective == "sortino":
+        max_weight = constraints.get('max_weight', 1.0) if constraints else 1.0
+        long_only = constraints.get('long_only', True) if constraints else True
+        weights, port_returns, metrics = optimizer.mean_variance(
+            objective='sortino',
+            max_weight=max_weight,
+            long_only=long_only
+        )
+    elif objective == "return":
+        # Maximize total return: allocate 100% to best-performing strategy
+        cumulative_returns = (1 + returns_df).cumprod() - 1
+        final_returns = cumulative_returns.iloc[-1] if len(cumulative_returns) > 0 else returns_df.sum()
+
+        best_strategy = final_returns.idxmax()
+        best_return = final_returns.max()
+
+        print(f"\nMax Return objective selected strategy: {best_strategy}")
+        print(f"  Cumulative return: {best_return:.2%}")
+
+        # Create weights dict with 100% in best strategy
+        weights = {col: 0.0 for col in returns_df.columns}
+        weights[best_strategy] = 1.0
+
+        # Calculate portfolio returns (same as best strategy's returns)
+        port_returns = returns_df[best_strategy]
+
+        # Calculate metrics for the portfolio
+        metrics = {
+            'annual_return': port_returns.mean() * 252 * 390,  # Annualize for minute bars
+            'annual_volatility': port_returns.std() * np.sqrt(252 * 390),
+            'sharpe': sharpe(port_returns.values) if len(port_returns) > 0 else 0,
+            'max_dd': max_drawdown((1 + port_returns).cumprod().values) if len(port_returns) > 0 else 0,
+            'total_return': best_return
+        }
     else:
         raise ValueError(f"Unknown objective: {objective}")
 
@@ -422,7 +468,7 @@ def main():
     )
     parser.add_argument(
         "--objective",
-        choices=["equal", "risk_parity", "sharpe", "sortino"],
+        choices=["equal", "risk_parity", "sharpe", "sortino", "return"],
         default="sharpe",
         help="Optimization objective for static mode (default: sharpe)"
     )
@@ -451,6 +497,20 @@ def main():
     parser.add_argument(
         "--config",
         help="Path to YAML config file (overrides command-line args)"
+    )
+
+    # Transaction costs
+    parser.add_argument(
+        "--slippage",
+        type=float,
+        default=0.0,
+        help="Slippage rate as fraction (e.g., 0.0005 = 0.05%%, default: 0.0)"
+    )
+    parser.add_argument(
+        "--commission",
+        type=float,
+        default=0.0,
+        help="Commission per share in dollars (default: 0.0)"
     )
 
     args = parser.parse_args()
@@ -489,7 +549,9 @@ def main():
         tickers,
         args.start,
         args.end,
-        args.capital
+        args.capital,
+        args.slippage,
+        args.commission
     )
 
     # Run optimization

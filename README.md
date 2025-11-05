@@ -11,11 +11,12 @@ Building data-driven trading strategies using high-performance analytics, machin
 TRADER is an advanced research and development platform for quantitative trading strategies. It processes market data at scale using modern data engineering tools and applies statistical, machine learning, and portfolio optimization techniques to identify profitable trading opportunities.
 
 **Key Features:**
-- **8 Production-Ready Intraday Strategies** - Momentum, mean-reversion, pairs trading, and ML-based
+- **14 Production-Ready Intraday Strategies** - Momentum, mean-reversion, pairs trading, and ML-based
+- **Full Year of Historical Data** - Oct 2024 - Oct 2025 (~400M minute bars)
 - **Automated Parameter Optimization** - Grid search, random search, and genetic algorithms
 - **Portfolio Optimization** - Static (Markowitz, Risk Parity) and dynamic allocation
 - **ML-Based Strategy Selection** - Adaptive weighting using gradient boosting
-- **High-Performance Backtesting** - Minute-level data with realistic execution simulation
+- **High-Performance Backtesting** - Minute-level data with realistic transaction costs
 - **Cloud-Native Architecture** - AWS S3 data lake with DuckDB analytics
 
 ---
@@ -59,19 +60,21 @@ copy .env.example .env
 ### Run Your First Backtest
 
 ```powershell
-# Test a single strategy
-python -m trader.strategy_suite.backtest \
-  --strategy momentum.BreakoutMomentum \
+# Test a single strategy (with transaction costs)
+cd src
+../.venv/Scripts/python -m trader.strategy_suite.backtest \
+  --strategy mean_reversion.VWAPReversion \
   --tickers AAPL,MSFT \
-  --start 2025-10-01 --end 2025-10-24 \
-  --capital 100000
+  --start 2025-10-01 --end 2025-10-31 \
+  --capital 100000 \
+  --slippage 0.0005 --commission 0.001
 ```
 
 ---
 
 ## Trading Strategies
 
-TRADER includes 8 battle-tested intraday strategies:
+TRADER includes 14 battle-tested intraday strategies (8 from Phase 4, 5 from Phase 3, 1 ML from Phase 5):
 
 ### Momentum Strategies
 

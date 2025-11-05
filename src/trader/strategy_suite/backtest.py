@@ -21,6 +21,7 @@ from .strategies.momentum import BreakoutMomentumStrategy, VolumeSpikeStrategy
 from .strategies.mean_reversion import VWAPReversionStrategy, BollingerBandStrategy
 from .strategies.stat_arb import PairsTradingStrategy
 from .strategies.ml import MLClassifierStrategy
+from .strategies.machine_learning import MLClassifierStrategy as MLClassifierStrategyNew
 from .optimal.optimal import OptimalStrategy
 
 
@@ -416,6 +417,7 @@ def main():
             "mean_reversion.BollingerBand",
             "stat_arb.PairsTrading",
             "ml.MLClassifier",
+            "machine_learning.MLClassifier",
             "optimal.OptimalStrategy",
         ],
         help="Strategy to backtest"
@@ -445,6 +447,18 @@ def main():
         "--params",
         help="Strategy parameters as JSON string (e.g., '{\"lookback_bars\": 30}')"
     )
+    parser.add_argument(
+        "--slippage",
+        type=float,
+        default=0.0,
+        help="Slippage rate as fraction (e.g., 0.0005 = 0.05%%, default: 0.0)"
+    )
+    parser.add_argument(
+        "--commission",
+        type=float,
+        default=0.0,
+        help="Commission per share in dollars (default: 0.0)"
+    )
 
     args = parser.parse_args()
 
@@ -465,6 +479,7 @@ def main():
         "mean_reversion.BollingerBand": BollingerBandStrategy,
         "stat_arb.PairsTrading": PairsTradingStrategy,
         "ml.MLClassifier": MLClassifierStrategy,
+        "machine_learning.MLClassifier": MLClassifierStrategyNew,
         "optimal.OptimalStrategy": OptimalStrategy,
     }
 
@@ -477,7 +492,9 @@ def main():
         tickers=tickers,
         start_date=args.start,
         end_date=args.end,
-        initial_capital=args.capital
+        initial_capital=args.capital,
+        slippage_rate=args.slippage,
+        commission_per_share=args.commission
     )
 
     print("\nBacktest completed successfully!")
