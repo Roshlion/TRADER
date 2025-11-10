@@ -7,7 +7,7 @@
 
 ## Current Status
 
-**Active Runs:** 1 (Run #1 launching)
+**Active Runs:** 1 (Run #1 RUNNING - started 07:48 UTC)
 **Completed Runs:** 0
 **Failed Runs:** 0
 
@@ -116,10 +116,10 @@
 **Checklist:**
 - [x] Spot request submitted (sir-hnhzbj2h)
 - [x] Instance launched (i-0d29dbfff95608560)
-- [ ] Setup complete (clone repo + AWS creds + dependencies)
-- [ ] Small test passed (run_remote_small.sh)
-- [ ] Full run started (run_remote_full.sh)
-- [ ] Run completed
+- [x] Setup complete (clone repo + AWS creds + dependencies)
+- [x] Small test passed (2 strategies, 1 week, Sharpe=0.225)
+- [x] Full run started (PID 6368, tmux session "optimizer", log: logs/ec2_full_20251110_074825.log)
+- [ ] Run completed (ETA: ~12:00-13:00 UTC)
 - [ ] Results uploaded to S3
 - [ ] Instance terminated
 - [ ] Results validated
@@ -132,6 +132,13 @@
 - 09:31:30 UTC: Cancelled sir-epcz9vcj, increased price to $0.20
 - 09:45:00 UTC: Relaunched with sir-hnhzbj2h - SUCCESS
 - 09:45:45 UTC: Instance i-0d29dbfff95608560 running at 3.239.18.187
+- 09:50:00 UTC: Setup complete (Python 3.10, dependencies installed, S3 access confirmed)
+- 09:55:00 UTC: Small test PASSED (2 strategies, Sharpe=0.225, artifacts generated)
+- 09:56:00 UTC: Ready for full annual optimization
+- 10:47:00 UTC: Fixed run_remote_full.sh directory path issue (TRADER vs Trader)
+- 10:48:00 UTC: **FULL RUN STARTED** - PID 6368, tmux "optimizer", Run ID 20251110_074825
+- 10:48:30 UTC: Confirmed process running (CPU 35%, Memory 1.8GB)
+- Expected completion: ~12:00-13:00 UTC (4-5 hours from start)
 
 ---
 
