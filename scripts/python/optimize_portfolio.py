@@ -21,6 +21,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 from trader.strategy_suite.backtest import run_backtest
 from trader.strategy_suite.optimizer.weights import StaticOptimizer
 from trader.strategy_suite.optimizer.dynamic import DynamicAllocator
+from trader.strategy_suite.optimizer.walk_forward import WalkForwardValidator
+from trader.strategy_suite.optimizer.turnover import add_turnover_metrics
+from trader.strategy_suite.optimizer.regime import RegimeDetector, blend_with_regime_scores
+from trader.strategy_suite.optimizer.meta import MetaSelector
 from trader.strategy_suite.visualization import (
     plot_equity_curve,
     plot_drawdown,
@@ -298,9 +302,11 @@ def optimize_dynamic(
     else:
         raise ValueError(f"Unknown dynamic mode: {mode}")
 
-    # Calculate metrics
-    from trader.strategy_suite.metrics import calculate_metrics
-    metrics = calculate_metrics(port_returns)
+    # Calculate metrics using StaticOptimizer's internal method
+    from trader.strategy_suite.optimizer.weights import StaticOptimizer
+    temp_optimizer = StaticOptimizer(returns_df)
+    avg_weights = weights_df.mean(axis=0).values
+    metrics = temp_optimizer._calculate_metrics(avg_weights, port_returns)
 
     return weights_df, port_returns, metrics
 
@@ -513,6 +519,87 @@ def main():
         help="Commission per share in dollars (default: 0.0)"
     )
 
+    # Walk-forward validation
+    parser.add_argument(
+        "--walkforward",
+        choices=["on", "off"],
+        default="off",
+        help="Enable walk-forward validation (default: off)"
+    )
+    parser.add_argument(
+        "--wf-train-days",
+        type=int,
+        default=10,
+        help="Walk-forward training window in days (default: 10)"
+    )
+    parser.add_argument(
+        "--wf-test-days",
+        type=int,
+        default=5,
+        help="Walk-forward test window in days (default: 5)"
+    )
+    parser.add_argument(
+        "--wf-overlap-days",
+        type=int,
+        default=0,
+        help="Walk-forward overlap in days (default: 0)"
+    )
+
+    # Cost-aware optimization
+    parser.add_argument(
+        "--cost-aware",
+        choices=["on", "off"],
+        default="on",
+        help="Enable cost-aware optimization (penalize turnover, default: on)"
+    )
+    parser.add_argument(
+        "--rebalance-cost-bps",
+        type=float,
+        default=1.0,
+        help="Rebalancing cost in bps per %% turnover (default: 1.0)"
+    )
+    parser.add_argument(
+        "--turnover-window",
+        type=int,
+        default=60,
+        help="Turnover calculation window in bars (default: 60)"
+    )
+
+    # Regime-aware optimization
+    parser.add_argument(
+        "--regime",
+        choices=["on", "off"],
+        default="on",
+        help="Enable regime-aware strategy selection (default: on)"
+    )
+    parser.add_argument(
+        "--regime-weight",
+        type=float,
+        default=0.25,
+        help="Weight for regime blending (0-1, default: 0.25)"
+    )
+
+    # Meta-learning mode
+    parser.add_argument(
+        "--meta-kind",
+        choices=["classifier", "regressor"],
+        default="classifier",
+        help="Meta-learning mode: classifier (pick best) or regressor (weight by predicted return)"
+    )
+
+    # Constraints
+    parser.add_argument(
+        "--max-weight",
+        type=float,
+        help="Maximum weight per strategy (e.g., 0.5 for 50%%)"
+    )
+    parser.add_argument(
+        "--long-only",
+        action="store_true",
+        default=False,
+        help="Only allow long positions (no short selling)"
+    )
+
     args = parser.parse_args()
 
     # Load config if provided
@@ -554,6 +641,39 @@ def main():
         args.commission
     )
 
+    # Check if walk-forward validation is enabled
+    if args.walkforward == "on":
+        print("\n" + "="*60)
+        print("Running Walk-Forward Validation")
+        print("="*60)
+
+        # Create walk-forward validator
+        wfv = WalkForwardValidator(
+            returns_df,
+            train_days=args.wf_train_days,
+            test_days=args.wf_test_days,
+            overlap_days=args.wf_overlap_days
+        )
+
+        # Get constraints
+        max_weight = args.max_weight if hasattr(args, 'max_weight') else None
+        long_only = args.long_only if hasattr(args, 'long_only') else True
+
+        # Run walk-forward validation
+        wfv_results = wfv.run(
+            objective=args.objective,
+            max_weight=max_weight,
+            long_only=long_only
+        )
+
+        # Save WFV results
+        wfv.save_results(wfv_results)
+
+        print("\n" + "="*60)
+        print("Walk-Forward Validation Complete!")
+        print("="*60)
+        return
+
     # Run optimization
     if args.mode == "static":
         weights, portfolio_returns, metrics = optimize_static(
@@ -561,6 +681,48 @@ def main():
             objective=args.objective,
             constraints=constraints
         )
+
+        # Add turnover metrics if cost-aware mode is enabled
+        if args.cost_aware == "on":
+            metrics = add_turnover_metrics(
+                returns_df,
+                weights,
+                metrics,
+                rebalance_cost_bps=args.rebalance_cost_bps,
+                turnover_window=args.turnover_window
+            )
+
+        # Apply regime-aware blending if enabled
+        if args.regime == "on":
+            print("\nApplying regime-aware weight adjustment...")
+            detector = RegimeDetector()
+            regime_scores = detector.calculate_regime_scores(returns_df, returns_df)
+
+            # Blend weights with regime scores
+            weights = blend_with_regime_scores(
+                weights,
+                regime_scores,
+                regime_weight=args.regime_weight
+            )
+
+            # Recalculate portfolio returns and metrics with blended weights
+            weights_array = np.array([weights.get(col, 0.0) for col in returns_df.columns])
+            portfolio_returns = (returns_df * weights_array).sum(axis=1)
+
+            # Recalculate metrics using StaticOptimizer's internal method
+            from trader.strategy_suite.optimizer.weights import StaticOptimizer
+            temp_optimizer = StaticOptimizer(returns_df)
+            metrics = temp_optimizer._calculate_metrics(weights_array, portfolio_returns)
+
+            # Re-add turnover metrics if needed
+            if args.cost_aware == "on":
+                metrics = add_turnover_metrics(
+                    returns_df,
+                    weights,
+                    metrics,
+                    rebalance_cost_bps=args.rebalance_cost_bps,
+                    turnover_window=args.turnover_window
+                )
 
         # Print results
         print("\nOptimal Weights:")
@@ -588,8 +750,47 @@ def main():
         # Use final weights as dict for saving
         weights = weights_df
 
+    elif args.mode == "meta":
+        print("\nRunning Meta-Learning Optimization...")
+
+        # Create meta selector
+        meta_selector = MetaSelector(
+            returns_df,
+            mode=args.meta_kind,
+            lookback=20,
+            n_splits=3
+        )
+
+        # Train and backtest
+        meta_selector.train()
+        portfolio_returns, weights_df = meta_selector.backtest()
+
+        # Calculate metrics using StaticOptimizer's internal method
+        from trader.strategy_suite.optimizer.weights import StaticOptimizer
+        temp_optimizer = StaticOptimizer(returns_df)
+        avg_weights_array = weights_df.mean(axis=0).values
+        metrics = temp_optimizer._calculate_metrics(avg_weights_array, portfolio_returns)
+
+        # Print final weights (average over time)
+        print("\nAverage Weights Over Time:")
+        avg_weights = weights_df.mean(axis=0)
+        for strat, weight in sorted(avg_weights.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {strat:.<40} {weight:>10.2%}")
+
+        print_metrics_table(metrics, "Meta Portfolio Metrics")
+
+        # Save model
+        model_dir = Path("artifacts/meta")
+        model_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_file = model_dir / f"meta_model_{timestamp}.pkl"
+        meta_selector.save(str(model_file))
+
+        # Use weights_df for saving
+        weights = weights_df
+
     else:
-        raise NotImplementedError("Meta mode not yet implemented")
+        raise ValueError(f"Unknown mode: {args.mode}")
 
     # Save results
     weights_file = save_results(

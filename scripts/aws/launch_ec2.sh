@@ -11,10 +11,10 @@
 # Configuration
 INSTANCE_TYPE="c6i.2xlarge"
 AMI_ID="ami-0c7217cdde317cfec"  # Ubuntu 22.04 LTS in us-east-1 (update if needed)
-KEY_NAME="YOUR_KEY_PAIR_NAME"   # REQUIRED: Replace with your key pair name
-SECURITY_GROUP="YOUR_SECURITY_GROUP"  # REQUIRED: Replace with security group allowing SSH
+KEY_NAME="trader-optimizer"   # EC2 key pair
+SECURITY_GROUP="sg-0616e1ad92cffbda8"  # trader-optimizer-sg (allows SSH)
 REGION="us-east-1"
-SPOT_PRICE="0.15"  # Max price willing to pay (current ~$0.10-0.12)
+SPOT_PRICE="0.20"  # Max price willing to pay (current ~$0.17)
 VOLUME_SIZE=30  # GB for root volume
 
 # Colors for output
@@ -61,8 +61,8 @@ echo "  Spot Max Price: \$$SPOT_PRICE/hour (current ~\$0.10-0.12)"
 echo "  AMI: $AMI_ID (Ubuntu 22.04 LTS)"
 echo ""
 
-# Launch spot instance
-LAUNCH_OUTPUT=$(aws ec2 request-spot-instances \
+# Launch spot instance and extract request ID directly
+REQUEST_ID=$(aws ec2 request-spot-instances \
     --region "$REGION" \
     --spot-price "$SPOT_PRICE" \
     --instance-count 1 \
@@ -80,31 +80,15 @@ LAUNCH_OUTPUT=$(aws ec2 request-spot-instances \
                 \"VolumeType\": \"gp3\",
                 \"DeleteOnTermination\": true
             }
-        }],
-        \"IamInstanceProfile\": {
-            \"Name\": \"EC2-S3-Access\"
-        },
-        \"TagSpecifications\": [{
-            \"ResourceType\": \"instance\",
-            \"Tags\": [{
-                \"Key\": \"Name\",
-                \"Value\": \"trader-optimizer\"
-            }, {
-                \"Key\": \"Project\",
-                \"Value\": \"TRADER\"
-            }, {
-                \"Key\": \"AutoShutdown\",
-                \"Value\": \"enabled\"
-            }]
         }]
     }" \
-    --output json 2>&1)
+    --query 'SpotInstanceRequests[0].SpotInstanceRequestId' \
+    --output text 2>&1)
 
-if [ $? -eq 0 ]; then
+if [ $? -eq 0 ] && [ -n "$REQUEST_ID" ] && [ "$REQUEST_ID" != "None" ]; then
     echo -e "${GREEN}Spot request submitted successfully!${NC}"
 
-    # Extract spot request ID
-    REQUEST_ID=$(echo "$LAUNCH_OUTPUT" | jq -r '.SpotInstanceRequests[0].SpotInstanceRequestId')
+    # Request ID already extracted
     echo "Spot Request ID: $REQUEST_ID"
     echo ""
     echo "Waiting for instance to be assigned..."
@@ -131,6 +115,16 @@ if [ $? -eq 0 ]; then
         --instance-ids "$INSTANCE_ID" \
         --query 'Reservations[0].Instances[0].PublicIpAddress' \
         --output text)
+
+    # Tag the instance (tags cannot be in LaunchSpecification for spot instances)
+    echo "Tagging instance..."
+    aws ec2 create-tags \
+        --region "$REGION" \
+        --resources "$INSTANCE_ID" \
+        --tags \
+            Key=Name,Value=trader-optimizer \
+            Key=Project,Value=TRADER \
+            Key=AutoShutdown,Value=enabled
 
     echo ""
     echo -e "${GREEN}=== Instance Ready! ===${NC}"
@@ -159,7 +153,8 @@ if [ $? -eq 0 ]; then
     echo ""
 else
     echo -e "${RED}Failed to launch instance!${NC}"
-    echo "Error output:"
-    echo "$LAUNCH_OUTPUT"
+    echo "Error: Could not obtain spot request ID"
+    echo "Request ID value: '$REQUEST_ID'"
+    echo "This may indicate an AWS API error or permission issue."
     exit 1
 fi
