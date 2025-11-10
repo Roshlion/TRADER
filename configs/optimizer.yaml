@@ -1,0 +1,14 @@
+objective: sharpe
+mode: static   # static|dynamic|meta
+strategies:
+  - opening_range.ORB
+  - vwap_bands.VWAPBands
+  - bollinger_revert.BollRevert
+  - cross_sectional_momo.CSM
+
+constraints:
+  long_only: true
+  max_weight: 0.5
+
+slippage_bps: 1.0
+fees_bps: 0.2

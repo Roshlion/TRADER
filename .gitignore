@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+.ipynb_checkpoints/
+
+# Data & temp
+data/
+!data/.gitkeep
+tmp/
+.cache/
+artifacts/
+!artifacts/.gitkeep
+
+# Internal documentation (not for public repo)
+CLAUDE.md
+DOCUMENTATION.md
+OPTIMIZER_ANALYSIS.md
+VALIDATION_RESULTS.md
+
+# OS/Editor
+.DS_Store
+.vscode/
+.claude/
+reports/

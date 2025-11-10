@@ -1,0 +1,13 @@
+boto3
+pandas
+polars
+pyarrow
+duckdb
+python-dotenv
+scipy
+scikit-learn
+pyyaml
+statsmodels
+matplotlib
+numpy
+seaborn

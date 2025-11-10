@@ -1,0 +1,813 @@
+"""
+CLI for multi-strategy portfolio optimization.
+
+Runs multiple strategies, combines their returns, and optimizes portfolio weights
+using various methods (static, dynamic, meta).
+"""
+
+import argparse
+import json
+import sys
+import yaml
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Any
+import pandas as pd
+import numpy as np
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+from trader.strategy_suite.backtest import run_backtest
+from trader.strategy_suite.optimizer.weights import StaticOptimizer
+from trader.strategy_suite.optimizer.dynamic import DynamicAllocator
+from trader.strategy_suite.optimizer.walk_forward import WalkForwardValidator
+from trader.strategy_suite.optimizer.turnover import add_turnover_metrics
+from trader.strategy_suite.optimizer.regime import RegimeDetector, blend_with_regime_scores
+from trader.strategy_suite.optimizer.meta import MetaSelector
+from trader.strategy_suite.visualization import (
+    plot_equity_curve,
+    plot_drawdown,
+    plot_multi_equity,
+    plot_corr_heatmap,
+    plot_weight_trajectory
+)
+from trader.strategy_suite.metrics import (
+    sharpe,
+    sortino,
+    max_drawdown,
+    calculate_metrics
+)
+
+# Import all strategies
+from trader.strategy_suite.strategies.opening_range import ORB
+from trader.strategy_suite.strategies.volatility_breakout import ATRBreakout
+from trader.strategy_suite.strategies.vwap_bands import VWAPBands
+from trader.strategy_suite.strategies.bollinger_revert import BollRevert
+from trader.strategy_suite.strategies.intraday_seasonality import Seasonality
+from trader.strategy_suite.strategies.cross_sectional_momo import CSM
+from trader.strategy_suite.strategies.kalman_pairs import KalPairs
+from trader.strategy_suite.strategies.kf_trend import KFTrend
+from trader.strategy_suite.strategies.momentum import BreakoutMomentumStrategy, VolumeSpikeStrategy
+from trader.strategy_suite.strategies.mean_reversion import VWAPReversionStrategy, BollingerBandStrategy
+from trader.strategy_suite.strategies.stat_arb import PairsTradingStrategy
+from trader.strategy_suite.strategies.machine_learning import MLClassifierStrategy
+
+
+# Strategy registry
+STRATEGIES = {
+    # New strategies
+    "opening_range.ORB": ORB,
+    "volatility_breakout.ATRBreakout": ATRBreakout,
+    "vwap_bands.VWAPBands": VWAPBands,
+    "bollinger_revert.BollRevert": BollRevert,
+    "intraday_seasonality.Seasonality": Seasonality,
+    "cross_sectional_momo.CSM": CSM,
+    "kalman_pairs.KalPairs": KalPairs,
+    "kf_trend.KFTrend": KFTrend,
+
+    # Existing strategies
+    "momentum.BreakoutMomentum": BreakoutMomentumStrategy,
+    "momentum.VolumeSpike": VolumeSpikeStrategy,
+    "mean_reversion.VWAPReversion": VWAPReversionStrategy,
+    "mean_reversion.BollingerBand": BollingerBandStrategy,
+    "stat_arb.PairsTrading": PairsTradingStrategy,
+
+    # ML strategy
+    "machine_learning.MLClassifier": MLClassifierStrategy,
+}
+
+
+def load_config(config_file: str) -> dict:
+    """Load optimizer config from YAML file."""
+    with open(config_file, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def run_strategy_backtest(
+    strategy_name: str,
+    strategy_cls: type,
+    tickers: List[str],
+    start: str,
+    end: str,
+    capital: float,
+    slippage_rate: float = 0.0,
+    commission_per_share: float = 0.0,
+    **strategy_params
+) -> pd.Series:
+    """
+    Run backtest for a single strategy and return its returns series.
+
+    Returns:
+        Series indexed by timestamp with period returns
+    """
+    print(f"  Running backtest for {strategy_name}...")
+
+    try:
+        # Initialize strategy with default params
+        strategy = strategy_cls(params=strategy_params if strategy_params else {})
+
+        # Run backtest using existing API
+        results = run_backtest(
+            strategy=strategy,
+            tickers=tickers,
+            start_date=start,
+            end_date=end,
+            initial_capital=capital,
+            slippage_rate=slippage_rate,
+            commission_per_share=commission_per_share
+        )
+
+        # Extract equity curve
+        equity_curve = results.get('equity_curve', [])
+
+        if len(equity_curve) == 0:
+            print(f"    WARNING: No equity data for {strategy_name}")
+            return pd.Series(dtype=float)
+
+        # Convert equity curve (list of tuples) to returns series
+        timestamps = [t for t, _ in equity_curve]
+        values = [v for _, v in equity_curve]
+
+        equity_series = pd.Series(values, index=timestamps)
+        returns = equity_series.pct_change().fillna(0)
+        returns.name = strategy_name
+
+        final_equity = values[-1] if values else capital
+        print(f"    Completed: {len(returns)} bars, final equity: ${final_equity:,.2f}")
+
+        return returns
+
+    except Exception as e:
+        print(f"    ERROR running {strategy_name}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return pd.Series(dtype=float)
+
+
+def build_returns_matrix(
+    strategies: List[str],
+    tickers: List[str],
+    start: str,
+    end: str,
+    capital: float,
+    slippage_rate: float = 0.0,
+    commission_per_share: float = 0.0
+) -> pd.DataFrame:
+    """
+    Run backtests for all strategies and build returns matrix.
+
+    Returns:
+        DataFrame with columns = strategy names, index = timestamp, values = returns
+    """
+    print(f"\nRunning backtests for {len(strategies)} strategies...")
+
+    returns_dict = {}
+
+    for strat_name in strategies:
+        if strat_name not in STRATEGIES:
+            print(f"  WARNING: Unknown strategy '{strat_name}', skipping")
+            continue
+
+        strategy_cls = STRATEGIES[strat_name]
+
+        # Use default params (could load from config later)
+        strat_returns = run_strategy_backtest(
+            strat_name,
+            strategy_cls,
+            tickers,
+            start,
+            end,
+            capital,
+            slippage_rate,
+            commission_per_share
+        )
+
+        if len(strat_returns) > 0:
+            returns_dict[strat_name] = strat_returns
+
+    if not returns_dict:
+        raise ValueError("No valid strategy returns generated")
+
+    # Combine into DataFrame and align timestamps
+    returns_df = pd.DataFrame(returns_dict)
+
+    # Forward fill missing values (if strategies have different timestamps)
+    returns_df = returns_df.fillna(0)
+
+    print(f"\nReturns matrix: {returns_df.shape[0]} bars × {returns_df.shape[1]} strategies")
+    return returns_df
+
+
+def optimize_static(
+    returns_df: pd.DataFrame,
+    objective: str = "sharpe",
+    constraints: dict = None
+) -> tuple:
+    """
+    Run static optimization.
+
+    Returns:
+        (weights_dict, portfolio_returns, metrics)
+    """
+    print(f"\nOptimizing static portfolio (objective: {objective})...")
+
+    optimizer = StaticOptimizer(returns_df)
+
+    if objective == "equal":
+        weights, port_returns, metrics = optimizer.equal()
+    elif objective == "risk_parity":
+        weights, port_returns, metrics = optimizer.risk_parity()
+    elif objective == "sharpe":
+        # Pass constraints if provided
+        max_weight = constraints.get('max_weight', 1.0) if constraints else 1.0
+        long_only = constraints.get('long_only', True) if constraints else True
+        weights, port_returns, metrics = optimizer.mean_variance(
+            objective='sharpe',
+            max_weight=max_weight,
+            long_only=long_only
+        )
+    elif objective == "sortino":
+        max_weight = constraints.get('max_weight', 1.0) if constraints else 1.0
+        long_only = constraints.get('long_only', True) if constraints else True
+        weights, port_returns, metrics = optimizer.mean_variance(
+            objective='sortino',
+            max_weight=max_weight,
+            long_only=long_only
+        )
+    elif objective == "return":
+        # Maximize total return: allocate 100% to best-performing strategy
+        cumulative_returns = (1 + returns_df).cumprod() - 1
+        final_returns = cumulative_returns.iloc[-1] if len(cumulative_returns) > 0 else returns_df.sum()
+
+        best_strategy = final_returns.idxmax()
+        best_return = final_returns.max()
+
+        print(f"\nMax Return objective selected strategy: {best_strategy}")
+        print(f"  Cumulative return: {best_return:.2%}")
+
+        # Create weights dict with 100% in best strategy
+        weights = {col: 0.0 for col in returns_df.columns}
+        weights[best_strategy] = 1.0
+
+        # Calculate portfolio returns (same as best strategy's returns)
+        port_returns = returns_df[best_strategy]
+
+        # Calculate metrics for the portfolio
+        metrics = {
+            'annual_return': port_returns.mean() * 252 * 390,  # Annualize for minute bars
+            'annual_volatility': port_returns.std() * np.sqrt(252 * 390),
+            'sharpe': sharpe(port_returns.values) if len(port_returns) > 0 else 0,
+            'max_dd': max_drawdown((1 + port_returns).cumprod().values) if len(port_returns) > 0 else 0,
+            'total_return': best_return
+        }
+    else:
+        raise ValueError(f"Unknown objective: {objective}")
+
+    return weights, port_returns, metrics
+
+
+def optimize_dynamic(
+    returns_df: pd.DataFrame,
+    mode: str = "rolling",
+    window: int = 240,
+    rebalance: int = 60
+) -> tuple:
+    """
+    Run dynamic optimization.
+
+    Returns:
+        (weights_df, portfolio_returns, metrics)
+    """
+    print(f"\nOptimizing dynamic portfolio (mode: {mode}, window: {window}, rebalance: {rebalance})...")
+
+    allocator = DynamicAllocator(returns_df)
+
+    if mode == "rolling":
+        port_returns, weights_df = allocator.rolling_perf(
+            window=window,
+            rebalance=rebalance,
+            floor=0.0
+        )
+    elif mode == "regime":
+        # For regime, we'd need to implement regime detection
+        # For now, fall back to rolling
+        print("  WARNING: Regime mode not fully implemented, using rolling instead")
+        port_returns, weights_df = allocator.rolling_perf(
+            window=window,
+            rebalance=rebalance,
+            floor=0.0
+        )
+    else:
+        raise ValueError(f"Unknown dynamic mode: {mode}")
+
+    # Calculate metrics using StaticOptimizer's internal method
+    from trader.strategy_suite.optimizer.weights import StaticOptimizer
+    temp_optimizer = StaticOptimizer(returns_df)
+    avg_weights = weights_df.mean(axis=0).values
+    metrics = temp_optimizer._calculate_metrics(avg_weights, port_returns)
+
+    return weights_df, port_returns, metrics
+
+
+def save_results(
+    weights: Dict[str, float] or pd.DataFrame,
+    portfolio_returns: pd.Series,
+    metrics: Dict[str, float],
+    strategy_returns: pd.DataFrame,
+    mode: str,
+    objective: str
+) -> str:
+    """
+    Save optimization results to artifacts/ and reports/.
+
+    Returns:
+        Path to saved weights file
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Create output directories
+    artifacts_dir = Path("artifacts/portfolios")
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+    reports_dir = Path("reports/portfolio")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save weights
+    weights_file = artifacts_dir / f"{timestamp}_weights.json"
+
+    if isinstance(weights, dict):
+        # Static weights
+        weights_data = {
+            "mode": mode,
+            "objective": objective,
+            "timestamp": timestamp,
+            "weights": weights,
+            "metrics": metrics
+        }
+    else:
+        # Dynamic weights (DataFrame)
+        weights_data = {
+            "mode": mode,
+            "objective": objective,
+            "timestamp": timestamp,
+            "weights": "dynamic",  # Indicate it's time-varying
+            "metrics": metrics
+        }
+        # Save weights timeseries separately
+        weights_ts_file = artifacts_dir / f"{timestamp}_weights_timeseries.csv"
+        weights.to_csv(weights_ts_file)
+        print(f"\nSaved weights timeseries: {weights_ts_file}")
+
+    with open(weights_file, 'w') as f:
+        json.dump(weights_data, f, indent=2, default=str)
+
+    print(f"\nSaved weights: {weights_file}")
+
+    # Save metrics table
+    metrics_file = reports_dir / f"metrics_table.csv"
+    metrics_df = pd.DataFrame([metrics])
+    metrics_df.to_csv(metrics_file, index=False)
+    print(f"Saved metrics: {metrics_file}")
+
+    # Generate plots
+    print("\nGenerating plots...")
+
+    # 1. Equity curve
+    equity = (1 + portfolio_returns).cumprod()
+    equity_file = reports_dir / "equity_curve.png"
+
+    # Convert Series to list of tuples for plot_equity_curve
+    equity_tuples = [(ts, val) for ts, val in zip(equity.index, equity.values)]
+    plot_equity_curve(equity_tuples, title=f"Portfolio Equity Curve ({mode} {objective})", save_path=equity_file, show=False)
+    print(f"  Saved: {equity_file}")
+
+    # 2. Multi-equity (portfolio vs components)
+    multi_equity_file = reports_dir / "multi_equity.png"
+    component_equities = {col: (1 + strategy_returns[col]).cumprod() for col in strategy_returns.columns}
+    component_equities['Portfolio'] = equity
+    plot_multi_equity(component_equities, output_file=str(multi_equity_file))
+    print(f"  Saved: {multi_equity_file}")
+
+    # 3. Correlation heatmap
+    corr_file = reports_dir / "corr_heatmap.png"
+    plot_corr_heatmap(strategy_returns, output_file=str(corr_file))
+    print(f"  Saved: {corr_file}")
+
+    # 4. Weights trajectory (if dynamic)
+    if isinstance(weights, pd.DataFrame):
+        weights_plot_file = reports_dir / "weights_timeseries.png"
+        plot_weight_trajectory(weights, output_file=str(weights_plot_file))
+        print(f"  Saved: {weights_plot_file}")
+
+    # Also save latest_weights.json
+    latest_file = artifacts_dir / "latest_weights.json"
+    with open(latest_file, 'w') as f:
+        json.dump(weights_data, f, indent=2, default=str)
+    print(f"Saved latest: {latest_file}")
+
+    return str(weights_file)
+
+
+def print_metrics_table(metrics: Dict[str, float], title: str = "Portfolio Metrics"):
+    """Print metrics in a formatted table."""
+    print(f"\n{'='*60}")
+    print(f"{title:^60}")
+    print('='*60)
+
+    for key, value in metrics.items():
+        if isinstance(value, (int, float)):
+            if 'sharpe' in key.lower() or 'sortino' in key.lower() or 'calmar' in key.lower():
+                print(f"{key:.<30} {value:>10.3f}")
+            elif 'drawdown' in key.lower() or 'return' in key.lower():
+                print(f"{key:.<30} {value:>10.2%}")
+            else:
+                print(f"{key:.<30} {value:>10,.2f}")
+        else:
+            print(f"{key:.<30} {str(value):>10}")
+
+    print('='*60)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Optimize multi-strategy portfolio"
+    )
+
+    # Strategy selection
+    parser.add_argument(
+        "--strategies",
+        required=True,
+        help="Comma-separated list of strategies (or 'all')"
+    )
+
+    # Data parameters
+    parser.add_argument(
+        "--tickers",
+        required=True,
+        help="Comma-separated list of tickers"
+    )
+    parser.add_argument(
+        "--start",
+        required=True,
+        help="Start date (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--end",
+        required=True,
+        help="End date (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--capital",
+        type=float,
+        default=100000.0,
+        help="Initial capital (default: 100000)"
+    )
+
+    # Optimization mode
+    parser.add_argument(
+        "--mode",
+        choices=["static", "dynamic", "meta"],
+        default="static",
+        help="Optimization mode (default: static)"
+    )
+    parser.add_argument(
+        "--objective",
+        choices=["equal", "risk_parity", "sharpe", "sortino", "return"],
+        default="sharpe",
+        help="Optimization objective for static mode (default: sharpe)"
+    )
+
+    # Dynamic mode options
+    parser.add_argument(
+        "--dyn",
+        choices=["rolling", "regime"],
+        default="rolling",
+        help="Dynamic allocation method (default: rolling)"
+    )
+    parser.add_argument(
+        "--window",
+        type=int,
+        default=240,
+        help="Rolling window size in bars (default: 240)"
+    )
+    parser.add_argument(
+        "--rebalance",
+        type=int,
+        default=60,
+        help="Rebalancing frequency in bars (default: 60)"
+    )
+
+    # Configuration file
+    parser.add_argument(
+        "--config",
+        help="Path to YAML config file (overrides command-line args)"
+    )
+
+    # Transaction costs
+    parser.add_argument(
+        "--slippage",
+        type=float,
+        default=0.0,
+        help="Slippage rate as fraction (e.g., 0.0005 = 0.05%%, default: 0.0)"
+    )
+    parser.add_argument(
+        "--commission",
+        type=float,
+        default=0.0,
+        help="Commission per share in dollars (default: 0.0)"
+    )
+
+    # Walk-forward validation
+    parser.add_argument(
+        "--walkforward",
+        choices=["on", "off"],
+        default="off",
+        help="Enable walk-forward validation (default: off)"
+    )
+    parser.add_argument(
+        "--wf-train-days",
+        type=int,
+        default=10,
+        help="Walk-forward training window in days (default: 10)"
+    )
+    parser.add_argument(
+        "--wf-test-days",
+        type=int,
+        default=5,
+        help="Walk-forward test window in days (default: 5)"
+    )
+    parser.add_argument(
+        "--wf-overlap-days",
+        type=int,
+        default=0,
+        help="Walk-forward overlap in days (default: 0)"
+    )
+
+    # Cost-aware optimization
+    parser.add_argument(
+        "--cost-aware",
+        choices=["on", "off"],
+        default="on",
+        help="Enable cost-aware optimization (penalize turnover, default: on)"
+    )
+    parser.add_argument(
+        "--rebalance-cost-bps",
+        type=float,
+        default=1.0,
+        help="Rebalancing cost in bps per %% turnover (default: 1.0)"
+    )
+    parser.add_argument(
+        "--turnover-window",
+        type=int,
+        default=60,
+        help="Turnover calculation window in bars (default: 60)"
+    )
+
+    # Regime-aware optimization
+    parser.add_argument(
+        "--regime",
+        choices=["on", "off"],
+        default="on",
+        help="Enable regime-aware strategy selection (default: on)"
+    )
+    parser.add_argument(
+        "--regime-weight",
+        type=float,
+        default=0.25,
+        help="Weight for regime blending (0-1, default: 0.25)"
+    )
+
+    # Meta-learning mode
+    parser.add_argument(
+        "--meta-kind",
+        choices=["classifier", "regressor"],
+        default="classifier",
+        help="Meta-learning mode: classifier (pick best) or regressor (weight by predicted return)"
+    )
+
+    # Constraints
+    parser.add_argument(
+        "--max-weight",
+        type=float,
+        help="Maximum weight per strategy (e.g., 0.5 for 50%%)"
+    )
+    parser.add_argument(
+        "--long-only",
+        action="store_true",
+        default=False,
+        help="Only allow long positions (no short selling)"
+    )
+
+    args = parser.parse_args()
+
+    # Load config if provided
+    config = {}
+    if args.config:
+        config = load_config(args.config)
+
+    # Parse strategies
+    if args.strategies.lower() == "all":
+        strategies = list(STRATEGIES.keys())
+    else:
+        strategies = [s.strip() for s in args.strategies.split(",")]
+
+    # Parse tickers
+    tickers = [t.strip() for t in args.tickers.split(",")]
+
+    # Get constraints from config
+    constraints = config.get('constraints', {})
+
+    print("="*60)
+    print("Multi-Strategy Portfolio Optimizer")
+    print("="*60)
+    print(f"Mode: {args.mode}")
+    print(f"Objective: {args.objective}")
+    print(f"Strategies: {len(strategies)}")
+    print(f"Tickers: {', '.join(tickers)}")
+    print(f"Period: {args.start} to {args.end}")
+    print(f"Capital: ${args.capital:,.2f}")
+    print("="*60)
+
+    # Build returns matrix
+    returns_df = build_returns_matrix(
+        strategies,
+        tickers,
+        args.start,
+        args.end,
+        args.capital,
+        args.slippage,
+        args.commission
+    )
+
+    # Check if walk-forward validation is enabled
+    if args.walkforward == "on":
+        print("\n" + "="*60)
+        print("Running Walk-Forward Validation")
+        print("="*60)
+
+        # Create walk-forward validator
+        wfv = WalkForwardValidator(
+            returns_df,
+            train_days=args.wf_train_days,
+            test_days=args.wf_test_days,
+            overlap_days=args.wf_overlap_days
+        )
+
+        # Get constraints
+        max_weight = args.max_weight if hasattr(args, 'max_weight') else None
+        long_only = args.long_only if hasattr(args, 'long_only') else True
+
+        # Run walk-forward validation
+        wfv_results = wfv.run(
+            objective=args.objective,
+            max_weight=max_weight,
+            long_only=long_only
+        )
+
+        # Save WFV results
+        wfv.save_results(wfv_results)
+
+        print("\n" + "="*60)
+        print("Walk-Forward Validation Complete!")
+        print("="*60)
+        return
+
+    # Run optimization
+    if args.mode == "static":
+        weights, portfolio_returns, metrics = optimize_static(
+            returns_df,
+            objective=args.objective,
+            constraints=constraints
+        )
+
+        # Add turnover metrics if cost-aware mode is enabled
+        if args.cost_aware == "on":
+            metrics = add_turnover_metrics(
+                returns_df,
+                weights,
+                metrics,
+                rebalance_cost_bps=args.rebalance_cost_bps,
+                turnover_window=args.turnover_window
+            )
+
+        # Apply regime-aware blending if enabled
+        if args.regime == "on":
+            print("\nApplying regime-aware weight adjustment...")
+            detector = RegimeDetector()
+            regime_scores = detector.calculate_regime_scores(returns_df, returns_df)
+
+            # Blend weights with regime scores
+            weights = blend_with_regime_scores(
+                weights,
+                regime_scores,
+                regime_weight=args.regime_weight
+            )
+
+            # Recalculate portfolio returns and metrics with blended weights
+            weights_array = np.array([weights.get(col, 0.0) for col in returns_df.columns])
+            portfolio_returns = (returns_df * weights_array).sum(axis=1)
+
+            # Recalculate metrics using StaticOptimizer's internal method
+            from trader.strategy_suite.optimizer.weights import StaticOptimizer
+            temp_optimizer = StaticOptimizer(returns_df)
+            metrics = temp_optimizer._calculate_metrics(weights_array, portfolio_returns)
+
+            # Re-add turnover metrics if needed
+            if args.cost_aware == "on":
+                metrics = add_turnover_metrics(
+                    returns_df,
+                    weights,
+                    metrics,
+                    rebalance_cost_bps=args.rebalance_cost_bps,
+                    turnover_window=args.turnover_window
+                )
+
+        # Print results
+        print("\nOptimal Weights:")
+        for strat, weight in sorted(weights.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {strat:.<40} {weight:>10.2%}")
+
+        print_metrics_table(metrics, "Static Portfolio Metrics")
+
+    elif args.mode == "dynamic":
+        weights_df, portfolio_returns, metrics = optimize_dynamic(
+            returns_df,
+            mode=args.dyn,
+            window=args.window,
+            rebalance=args.rebalance
+        )
+
+        # Print final weights
+        print("\nFinal Weights (last rebalance):")
+        final_weights = weights_df.iloc[-1]
+        for strat, weight in sorted(final_weights.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {strat:.<40} {weight:>10.2%}")
+
+        print_metrics_table(metrics, "Dynamic Portfolio Metrics")
+
+        # Use final weights as dict for saving
+        weights = weights_df
+
+    elif args.mode == "meta":
+        print("\nRunning Meta-Learning Optimization...")
+
+        # Create meta selector
+        meta_selector = MetaSelector(
+            returns_df,
+            mode=args.meta_kind,
+            lookback=20,
+            n_splits=3
+        )
+
+        # Train and backtest
+        meta_selector.train()
+        portfolio_returns, weights_df = meta_selector.backtest()
+
+        # Calculate metrics using StaticOptimizer's internal method
+        from trader.strategy_suite.optimizer.weights import StaticOptimizer
+        temp_optimizer = StaticOptimizer(returns_df)
+        avg_weights_array = weights_df.mean(axis=0).values
+        metrics = temp_optimizer._calculate_metrics(avg_weights_array, portfolio_returns)
+
+        # Print final weights (average over time)
+        print("\nAverage Weights Over Time:")
+        avg_weights = weights_df.mean(axis=0)
+        for strat, weight in sorted(avg_weights.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {strat:.<40} {weight:>10.2%}")
+
+        print_metrics_table(metrics, "Meta Portfolio Metrics")
+
+        # Save model
+        model_dir = Path("artifacts/meta")
+        model_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_file = model_dir / f"meta_model_{timestamp}.pkl"
+        meta_selector.save(str(model_file))
+
+        # Use weights_df for saving
+        weights = weights_df
+
+    else:
+        raise ValueError(f"Unknown mode: {args.mode}")
+
+    # Save results
+    weights_file = save_results(
+        weights,
+        portfolio_returns,
+        metrics,
+        returns_df,
+        args.mode,
+        args.objective
+    )
+
+    print(f"\n{'='*60}")
+    print("Optimization complete!")
+    print(f"Weights saved to: {weights_file}")
+    print(f"Reports saved to: reports/portfolio/")
+    print('='*60)
+
+
+if __name__ == "__main__":
+    main()
