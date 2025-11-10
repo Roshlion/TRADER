@@ -26,7 +26,7 @@ read -p "Press ENTER to continue or Ctrl+C to cancel..."
 echo ""
 
 # Change to repo directory
-cd ~/Trader || cd /home/ubuntu/Trader || { echo "ERROR: Trader directory not found"; exit 1; }
+cd ~/TRADER || cd /home/ubuntu/TRADER || cd ~/Trader || cd /home/ubuntu/Trader || { echo "ERROR: Trader directory not found"; exit 1; }
 
 # Activate virtual environment
 source .venv/bin/activate || source ~/.venv/trader/bin/activate || { echo "ERROR: Virtual environment not found"; exit 1; }
