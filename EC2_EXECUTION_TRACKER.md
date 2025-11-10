@@ -114,41 +114,47 @@
 - Transaction Costs: 0.05% slippage + $0.001/share commission
 
 **Checklist:**
-- [x] Spot request submitted (sir-hnhzbj2h)
-- [x] Instance launched (i-0d29dbfff95608560)
-- [x] Setup complete (clone repo + AWS creds + dependencies)
-- [x] Small test passed (2 strategies, 1 week, Sharpe=0.225)
-- [x] Full run started (PID 6368, tmux session "optimizer", log: logs/ec2_full_20251110_074825.log)
-- [ ] Run completed (ETA: ~12:00-13:00 UTC)
+- [x] Instance launched (t3.large on-demand)
+- [x] Setup complete via SCP upload (no git clone needed)
+- [x] AWS CLI installed and S3 access verified
+- [x] Small test passed (2 strategies, 3 days, AAPL only)
+- [x] S3 upload verified (s3://polygon-trader-data-roshen/trader-results/test_20251110_180825/)
+- [x] Full run started (PID 4543, tmux session "optimizer", log: logs/ec2_full_20251110_181411.log)
+- [ ] Run completed (ETA: ~02:00-06:00 UTC Nov 11)
 - [ ] Results uploaded to S3
 - [ ] Instance terminated
 - [ ] Results validated
 
 **Real-time Updates:**
-- 09:21:00 UTC: Spot request submitted (sir-epcz9vcj)
-- 09:21:05 UTC: Waiting for spot instance to be assigned...
-- 09:25:00 UTC: Launch script fixes completed (TagSpecifications, IAM, jq)
-- 09:31:00 UTC: First spot request failed (price $0.15 < minimum $0.1697)
-- 09:31:30 UTC: Cancelled sir-epcz9vcj, increased price to $0.20
-- 09:45:00 UTC: Relaunched with sir-hnhzbj2h - SUCCESS
-- 09:45:45 UTC: Instance i-0d29dbfff95608560 running at 3.239.18.187
-- 09:50:00 UTC: Setup complete (Python 3.10, dependencies installed, S3 access confirmed)
-- 09:55:00 UTC: Small test PASSED (2 strategies, Sharpe=0.225, artifacts generated)
-- 09:56:00 UTC: Ready for full annual optimization
-- 10:47:00 UTC: Fixed run_remote_full.sh directory path issue (TRADER vs Trader)
-- 10:48:00 UTC: **FULL RUN STARTED** - PID 6368, tmux "optimizer", Run ID 20251110_074825
-- 10:48:30 UTC: Confirmed process running (CPU 35%, Memory 1.8GB)
-- Expected completion: ~12:00-13:00 UTC (4-5 hours from start)
+- 17:57:00 UTC: Attempted c6i.2xlarge spot - no capacity available
+- 17:58:00 UTC: Cancelled spot request, switched to t3.large on-demand
+- 18:01:00 UTC: Instance i-0709a0f087f9476fd launched successfully
+- 18:02:00 UTC: SSH access confirmed
+- 18:03:00 UTC: Code uploaded via SCP (src/, scripts/, requirements.txt)
+- 18:05:00 UTC: Python venv created, dependencies installed
+- 18:06:00 UTC: AWS CLI installed, credentials configured
+- 18:07:00 UTC: S3 access verified (s3://polygon-trader-data-roshen/curated/)
+- 18:08:00 UTC: Small test PASSED (2 strategies × AAPL × 3 days, Sharpe=0.185)
+- 18:08:30 UTC: S3 upload verified (test_20251110_180825)
+- 18:08:45 UTC: Results downloaded and validated locally
+- 18:14:11 UTC: **FULL RUN STARTED** - PID 4543, tmux "optimizer", Run ID 20251110_181411
+- 18:14:30 UTC: Confirmed process running (CPU 25%, Memory 803MB)
+- Expected completion: ~02:00-06:00 UTC Nov 11 (8-12 hours from start)
 
 ---
 
 ## Cost Tracking
 
-| Run # | Instance Type | Runtime (hrs) | Spot Price | Total Cost | Date |
-|-------|---------------|---------------|------------|------------|------|
-| -     | -             | -             | -          | -          | -    |
+| Run # | Instance Type | Runtime (hrs) | Price/hr | Total Cost | Status | Date |
+|-------|---------------|---------------|----------|------------|--------|------|
+| 1     | c6i.2xlarge (spot) | ~5 | $0.11 | ~$0.55 | FAILED (results lost) | 2025-11-10 |
+| 2     | t3.large (on-demand) | 8-12 (est) | $0.0832 | ~$0.83-1.00 | RUNNING | 2025-11-10 |
 
-**Total EC2 Costs:** $0.00
+**Total EC2 Costs (to date):** ~$1.38-1.55
+
+**Notes:**
+- Run #1 wasted ~$0.55 due to premature termination
+- Run #2 uses on-demand for reliability (~$0.30 premium worth it)
 
 ---
 
