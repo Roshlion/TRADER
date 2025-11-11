@@ -83,6 +83,11 @@ class WalkForwardValidator:
         # Get unique CALENDAR dates (not timestamps)
         dates = pd.Series(self.returns_df.index.date).unique()
         dates = pd.to_datetime(dates)
+
+        # Make timezone-aware to match returns_df index
+        if self.returns_df.index.tz is not None:
+            dates = dates.tz_localize(self.returns_df.index.tz)
+
         dates = sorted(dates)
 
         current_idx = 0

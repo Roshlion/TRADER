@@ -129,7 +129,7 @@ class Backtester:
         for date_obj in dates:
             date_str = date_obj.strftime("%Y-%m-%d")
             year = date_obj.year
-            month = date_obj.month
+            month = f"{date_obj.month:02d}"  # Zero-pad month (09 instead of 9)
 
             # Parquet files are in partitioned structure: year=YYYY/month=MM/day=YYYY-MM-DD/part-0000.parquet
             s3_path = f"s3://{self.config.s3_bucket}/{self.config.s3_prefix}/year={year}/month={month}/day={date_str}/*.parquet"
@@ -351,7 +351,7 @@ def load_bars_s3(
     for date_obj in dates:
         date_str = date_obj.strftime("%Y-%m-%d")
         year = date_obj.year
-        month = date_obj.month
+        month = f"{date_obj.month:02d}"  # Zero-pad month (09 instead of 9)
 
         s3_path = f"s3://{s3_bucket}/{s3_prefix}/year={year}/month={month}/day={date_str}/*.parquet"
         ticker_list = ", ".join([f"'{t}'" for t in tickers])
