@@ -1,0 +1,23 @@
+{
+  "mode": "static",
+  "objective": "sharpe",
+  "timestamp": "20251110_180837",
+  "weights": {
+    "mean_reversion.VWAPReversion": 0.8750215162328291,
+    "opening_range.ORB": 0.12497848376717091
+  },
+  "metrics": {
+    "annual_return": 4.872361648049235,
+    "annual_volatility": 26.340231456731892,
+    "sharpe": 0.18497793597800688,
+    "sortino": 0.186511449150517,
+    "max_dd": -16.03919469788612,
+    "hit_rate": 42.782277274892806,
+    "total_return": 12.486126483351256,
+    "effective_n_strategies": 1.2799471223737093,
+    "turnover_pct": 1.1820422978175453,
+    "raw_sharpe": 3.652151252160943,
+    "cost_adjusted_sharpe": 3.6149385208539355,
+    "sharpe_penalty": 0.03721273130700764
+  }
+}
