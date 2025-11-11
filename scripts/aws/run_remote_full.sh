@@ -51,7 +51,7 @@ cat > logs/run_metadata_${TIMESTAMP}.json <<EOF
   "instance_type": "$(ec2-metadata --instance-type 2>/dev/null | cut -d' ' -f2 || echo 'unknown')",
   "strategies": "all",
   "tickers": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"],
-  "period": "2024-10-01 to 2025-10-01",
+  "period": "2024-10-01 to 2025-10-31",
   "features": {
     "walk_forward": true,
     "cost_aware": true,
@@ -81,7 +81,7 @@ echo ""
 python -m scripts.python.optimize_portfolio \
   --strategies mean_reversion.VWAPReversion,opening_range.ORB,volatility_breakout.ATRBreakout,vwap_bands.VWAPBands,bollinger_revert.BollRevert,intraday_seasonality.Seasonality,cross_sectional_momo.CSM,kalman_pairs.KalPairs,kf_trend.KFTrend,momentum.BreakoutMomentum,momentum.VolumeSpike,mean_reversion.BollingerBand,machine_learning.MLClassifier \
   --tickers AAPL,MSFT,GOOGL,AMZN,TSLA \
-  --start 2024-10-01 --end 2025-10-01 \
+  --start 2024-10-01 --end 2025-10-31 \
   --mode static --objective sharpe \
   --walkforward on --wf-train-days 10 --wf-test-days 5 \
   --cost-aware on --rebalance-cost-bps 1.0 \
