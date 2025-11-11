@@ -25,3 +25,4 @@ VALIDATION_RESULTS.md
 .vscode/
 .claude/
 reports/
+*.pem
